@@ -4,6 +4,27 @@ import oauth2
 from datetime import timedelta,datetime
 from config.database import db
 from bson import ObjectId
+from dotenv import dotenv_values
+import mimetypes
+import boto3
+import base64
+env = dict(dotenv_values(".env"))
+
+S3_IMAGE_LINK = env.get("S3_IMAGE_LINK")
+S3_BUCKET_NAME = env.get("S3_BUCKET_NAME")
+AWS_ACCESS_KEY_ID = env.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = env.get("AWS_SECRET_ACCESS_KEY")
+AWS_REGION_NAME = env.get("AWS_REGION_NAME")
+
+
+
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    region_name=AWS_REGION_NAME
+)
+
 
 
 
@@ -66,6 +87,17 @@ async def websocket_endpoint(websocket: WebSocket):
                             sourceid=source_result.inserted_id
                             backup_collection.insert_one({"message_id":sourceid,"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.now(),"relation":user_id})
 
+                        if 'image' and 'file_name' in data:
+                            file_name = data["file_name"]
+                            print(file_name)
+                            file_content = base64.b64decode(data["image"])
+                            print(file_content)
+
+                            content_type, _ = mimetypes.guess_type(file_name)
+                            s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=file_name, Body=file_content, ContentType=content_type)
+                            image_link = f"{S3_IMAGE_LINK}{file_name}"
+                            print(image_link)
+                            await user_inst.send_json({"image":image_link})
 
                         if 'typing' in data:
                             for user, user_inst in connected_users.items():
@@ -100,6 +132,16 @@ async def websocket_endpoint(websocket: WebSocket):
                                 for user, user_inst in connected_users.items():
                                     if user == data["id"]:
                                         await user_inst.send_text("Admin is typing")
+
+                            if 'image' and 'file_name' in data:
+                                file_name = data["file_name"]
+                                file_content = base64.b64decode(data["image"])
+
+                                content_type, _ = mimetypes.guess_type(file_name)
+                                s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=file_name, Body=file_content, ContentType=content_type)
+                                image_link = f"{S3_IMAGE_LINK}{file_name}"
+                                print(image_link)
+                                await user_inst.send_json({"image":image_link})
 
                             if "ping" in data:
                                 if admin_id in connected_users:
