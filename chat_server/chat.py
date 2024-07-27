@@ -1,8 +1,9 @@
 from fastapi import APIRouter,WebSocket,WebSocketDisconnect,Depends,HTTPException,status
 from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 import oauth2
-import datetime
+from datetime import timedelta,datetime
 from config.database import db
+from bson import ObjectId
 
 
 
@@ -29,7 +30,7 @@ async def websocket_endpoint(websocket: WebSocket):
     payload = oauth2.verify_customer_access_token(token)
     print(payload["email"])
     print(payload["exp"])
-    dt_object = datetime.datetime.fromtimestamp(payload["exp"])
+    dt_object = datetime.fromtimestamp(payload["exp"])
     print(dt_object)
     if payload and payload["email"] not in connected_users :
         await websocket.accept()
@@ -50,7 +51,7 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             while True:
 
-                if datetime.datetime.now() > dt_object:
+                if datetime.now() > dt_object:
                     await websocket.close()
                     del connected_users[user_id]
                     break
@@ -61,9 +62,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     if user==admin_id:
                         if 'message' in data:
                             await user_inst.send_json({"id":user_id,"message":data["message"]})
-                            source_result=source_collection.insert_one({"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.datetime.now(),"relation":user_id})
+                            source_result=source_collection.insert_one({"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.now(),"relation":user_id})
                             sourceid=source_result.inserted_id
-                            backup_collection.insert_one({"message_id":sourceid,"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.datetime.now(),"relation":user_id})
+                            backup_collection.insert_one({"message_id":sourceid,"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.now(),"relation":user_id})
 
 
                         if 'typing' in data:
@@ -91,9 +92,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         if user== data["id"]:
                             if "message" in data:
                                 await user_inst.send_json({"message":data["message"]})
-                                source_result=source_collection.insert_one({"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.datetime.now(),"relation":data["id"]})
+                                source_result=source_collection.insert_one({"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.now(),"relation":data["id"]})
                                 sourceid=source_result.inserted_id
-                                backup_collection.insert_one({"message_id":sourceid,"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.datetime.now(),"relation":data["id"]})
+                                backup_collection.insert_one({"message_id":sourceid,"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.now(),"relation":data["id"]})
 
                             if 'typing' in data:
                                 for user, user_inst in connected_users.items():
@@ -149,6 +150,7 @@ async def chat_history_user(user_id: str):
             chat_data[date_str] = []
         
         chat_data[date_str].append({
+            "id":str(chat["_id"]),
             "sender": chat["sender"],
             "content": chat["content"],
             "timestamp": chat["timestamp"]
@@ -175,6 +177,8 @@ async def chat_history_admin(user_id: str):
             chat_data[date_str] = []
         
         chat_data[date_str].append({
+            "id":str(chat["_id"]),
+            "message_id":str(chat["message_id"]),
             "sender": chat["sender"],
             "content": chat["content"],
             "timestamp": chat["timestamp"]
@@ -187,4 +191,56 @@ async def chat_history_admin(user_id: str):
 
 
 
-# @router.delete_for_me("/{message_id}")
+@router.delete("/delete_for_me/{message_id}")
+async def delete_for_me_user(message_id:str):
+    id=ObjectId(message_id)
+    delete_for_me=source_collection.delete_one({"_id":id})
+    
+    if delete_for_me.deleted_count==1:
+        return "Deleted"
+    else:
+        return "Not deleted"
+
+
+
+@router.delete("/delete_for_everyone/{message_id}")
+async def delete_for_everyone_user(message_id:str):
+    id=ObjectId(message_id)
+    message_data=source_collection.find_one({"_id":id})
+    if message_data:
+        if message_data["timestamp"]+timedelta(minutes=1)>=datetime.now():
+            user=source_collection.delete_one({"_id":id})
+            admin=backup_collection.delete_one({"message_id":id})
+            if user.deleted_count==1 or admin.deleted_count==1:
+                return "deleted"
+            else:
+                return "Not deleted"
+        else:
+            return "cannot delete: time exceeded"
+    else:
+        return "Data not found"
+    
+
+@router.delete("/delete_for_me_admin/{message_id}")
+async def delete_for_me_admin(message_id:str):
+    id=ObjectId(message_id)
+    delete_for_me=backup_collection.delete_one({"_id":id})
+    
+    if delete_for_me.deleted_count==1:
+        return "Deleted"
+    else:
+        return "Not deleted"
+    
+@router.delete("/delete_for_everyone_admin/{message_id}")
+async def delete_for_everyone_admin(message_id:str):
+    id=ObjectId(message_id)
+    message_data=backup_collection.find_one({"message_id":id})
+    if message_data:
+        user=source_collection.delete_one({"_id":id})
+        admin=backup_collection.delete_one({"message_id":id})
+        if user.deleted_count==1 or admin.deleted_count==1:
+            return "deleted"
+        else:
+            return "Not deleted"
+    else:
+        return "Data not found"
