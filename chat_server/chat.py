@@ -89,15 +89,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
                         if 'image' and 'file_name' in data:
                             file_name = data["file_name"]
-                            print(file_name)
                             file_content = base64.b64decode(data["image"])
-                            print(file_content)
 
                             content_type, _ = mimetypes.guess_type(file_name)
                             s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=file_name, Body=file_content, ContentType=content_type)
                             image_link = f"{S3_IMAGE_LINK}{file_name}"
                             print(image_link)
                             await user_inst.send_json({"image":image_link})
+                            source_result=source_collection.insert_one({"sender":user_id,"receipient":admin_id,"content":image_link,"timestamp":datetime.now(),"relation":user_id})
+                            sourceid=source_result.inserted_id
+                            backup_collection.insert_one({"message_id":sourceid,"sender":user_id,"receipient":admin_id,"content":image_link,"timestamp":datetime.now(),"relation":user_id})
 
                         if 'typing' in data:
                             for user, user_inst in connected_users.items():
@@ -142,6 +143,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 image_link = f"{S3_IMAGE_LINK}{file_name}"
                                 print(image_link)
                                 await user_inst.send_json({"image":image_link})
+                                source_result=source_collection.insert_one({"sender":admin_id,"receipient":data["id"],"content":image_link,"timestamp":datetime.now(),"relation":data["id"]})
+                                sourceid=source_result.inserted_id
+                                backup_collection.insert_one({"message_id":sourceid,"sender":admin_id,"receipient":data["id"],"content":image_link,"timestamp":datetime.now(),"relation":data["id"]})
 
                             if "ping" in data:
                                 if admin_id in connected_users:
