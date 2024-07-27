@@ -7,7 +7,8 @@ from config.database import db
 
 
  
-collection= db.chat_history
+source_collection= db.chat_history         #user
+backup_collection=db.chat_history_backup   #admin
 
 router=APIRouter()
 
@@ -60,7 +61,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     if user==admin_id:
                         if 'message' in data:
                             await user_inst.send_json({"id":user_id,"message":data["message"]})
-                            collection.insert_one({"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.datetime.now(),"relation":user_id})
+                            source_result=source_collection.insert_one({"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.datetime.now(),"relation":user_id})
+                            sourceid=source_result.inserted_id
+                            backup_collection.insert_one({"message_id":sourceid,"sender":user_id,"receipient":admin_id,"content":data["message"],"timestamp":datetime.datetime.now(),"relation":user_id})
+
 
                         if 'typing' in data:
                             for user, user_inst in connected_users.items():
@@ -87,7 +91,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         if user== data["id"]:
                             if "message" in data:
                                 await user_inst.send_json({"message":data["message"]})
-                                collection.insert_one({"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.datetime.now(),"relation":data["id"]})
+                                source_result=source_collection.insert_one({"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.datetime.now(),"relation":data["id"]})
+                                sourceid=source_result.inserted_id
+                                backup_collection.insert_one({"message_id":sourceid,"sender":admin_id,"receipient":data["id"],"content":data["message"],"timestamp":datetime.datetime.now(),"relation":data["id"]})
 
                             if 'typing' in data:
                                 for user, user_inst in connected_users.items():
@@ -105,15 +111,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         target_ws = connected_users[target_user_email]
                         del connected_users[target_user_email]
                         await target_ws.close() 
-
-                
-                    
-                    
-
-
-
-
-                
         except WebSocketDisconnect:
             del connected_users[user_id]
             await websocket.close()
@@ -123,7 +120,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @router.get("/{user_id}")
 def chat_history(user_id:str):
     chat=[]
-    data=collection.find({"relation":user_id})
+    data=source_collection.find({"relation":user_id})
     for i in data:
         chat.append(i)
     sorted_timestamp = sorted(chat, key=lambda x: x['timestamp'])
@@ -137,11 +134,11 @@ def chat_history(user_id:str):
     return sorted_chat
 
 
-@router.get("/date/{user_id}")
-async def chat_history(user_id: str):
+@router.get("/chat_user/{user_id}")
+async def chat_history_user(user_id: str):
     chat_data = {}
     
-    data = collection.find({"relation": user_id})
+    data = source_collection.find({"relation": user_id})
     
     for chat in data:
         date = chat['timestamp'].date()  
@@ -161,3 +158,33 @@ async def chat_history(user_id: str):
         chat_data[date] = sorted(chat_data[date], key=lambda x: x['timestamp'])
     
     return chat_data
+
+
+@router.get("/chat_admin/{user_id}")
+async def chat_history_admin(user_id: str):
+    chat_data = {}
+    
+    data = backup_collection.find({"relation": user_id})
+    
+    for chat in data:
+        date = chat['timestamp'].date()  
+        
+        date_str = date.strftime('%Y-%m-%d') 
+        
+        if date_str not in chat_data:
+            chat_data[date_str] = []
+        
+        chat_data[date_str].append({
+            "sender": chat["sender"],
+            "content": chat["content"],
+            "timestamp": chat["timestamp"]
+        })
+    
+    for date in chat_data:
+        chat_data[date] = sorted(chat_data[date], key=lambda x: x['timestamp'])
+    
+    return chat_data
+
+
+
+# @router.delete_for_me("/{message_id}")
