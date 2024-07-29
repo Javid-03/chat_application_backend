@@ -290,3 +290,10 @@ async def delete_for_everyone_admin(message_id:str):
             return "Not deleted"
     else:
         return "Data not found"
+    
+    
+    
+@router.get("/connected_users/{user_id}")
+def connected_users_delete(user_id:str):
+    connected_users.pop(user_id)
+    return "User Removed"
